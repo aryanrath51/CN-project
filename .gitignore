@@ -1,0 +1,33 @@
+# Compiled class files
+*.class
+out/
+build/
+bin/
+
+# Package files
+*.jar
+*.war
+*.ear
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test data
+*.tmp
+test_output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
