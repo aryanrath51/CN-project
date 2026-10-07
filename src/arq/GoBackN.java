@@ -1,5 +1,9 @@
 package arq;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import packet.Packet;
 import transport.UDPReceiver;
 import transport.UDPSender;
 
@@ -18,6 +22,9 @@ public class GoBackN implements ARQProtocol {
 
     // Receiver state
     private int expectedSequenceNumber = 0;
+
+    // Packets created from the current file transfer.
+    private final List<Packet> packetBuffer = new ArrayList<>();
 
     public GoBackN(
             UDPSender sender,
@@ -50,7 +57,80 @@ public class GoBackN implements ARQProtocol {
 
     @Override
     public void sendData(byte[] fileData) throws Exception {
-        // Go-Back-N sender implementation will be added incrementally.
+        if (fileData == null) {
+            throw new IllegalArgumentException("fileData cannot be null");
+        }
+
+        // Reset sender state for a new transfer.
+        packetBuffer.clear();
+        base = 0;
+        nextSequenceNumber = 0;
+
+        // Split the file into DATA packets.
+        packetBuffer.addAll(fragmentData(fileData));
+    }
+
+    /**
+     * Split the complete file into packets whose payload does not exceed
+     * Packet.MAX_PAYLOAD_SIZE.
+     */
+    private List<Packet> fragmentData(byte[] fileData) {
+        List<Packet> packets = new ArrayList<>();
+
+        // A zero-length file still needs one final DATA packet.
+        if (fileData.length == 0) {
+            packets.add(Packet.createData(
+                    0,
+                    new byte[0],
+                    true
+            ));
+            return packets;
+        }
+
+        int sequenceNumber = 0;
+
+        for (int offset = 0;
+             offset < fileData.length;
+             offset += Packet.MAX_PAYLOAD_SIZE) {
+
+            int remaining = fileData.length - offset;
+
+            int payloadSize = Math.min(
+                    Packet.MAX_PAYLOAD_SIZE,
+                    remaining
+            );
+
+            byte[] payload = Arrays.copyOfRange(
+                    fileData,
+                    offset,
+                    offset + payloadSize
+            );
+
+            boolean isLastFragment =
+                    offset + payloadSize >= fileData.length;
+
+            Packet packet = Packet.createData(
+                    sequenceNumber,
+                    payload,
+                    isLastFragment
+            );
+
+            packets.add(packet);
+            sequenceNumber++;
+        }
+
+        return packets;
+    }
+
+    /**
+     * Return the index immediately after the packets currently
+     * allowed by the Go-Back-N sender window.
+     */
+    private int getWindowEnd() {
+        return Math.min(
+                base + windowSize,
+                packetBuffer.size()
+        );
     }
 
     @Override
