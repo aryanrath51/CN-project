@@ -56,19 +56,22 @@ public class GoBackN implements ARQProtocol {
     }
 
     @Override
-    public void sendData(byte[] fileData) throws Exception {
-        if (fileData == null) {
-            throw new IllegalArgumentException("fileData cannot be null");
-        }
-
-        // Reset sender state for a new transfer.
-        packetBuffer.clear();
-        base = 0;
-        nextSequenceNumber = 0;
-
-        // Split the file into DATA packets.
-        packetBuffer.addAll(fragmentData(fileData));
+public void sendData(byte[] fileData) throws Exception {
+    if (fileData == null) {
+        throw new IllegalArgumentException("fileData cannot be null");
     }
+
+    // Reset sender state for a new transfer.
+    packetBuffer.clear();
+    base = 0;
+    nextSequenceNumber = 0;
+
+    // Split the file into DATA packets.
+    packetBuffer.addAll(fragmentData(fileData));
+
+    // Send the packets currently allowed by the GBN window.
+    sendWindow();
+}
 
     /**
      * Split the complete file into packets whose payload does not exceed
@@ -132,6 +135,27 @@ public class GoBackN implements ARQProtocol {
                 packetBuffer.size()
         );
     }
+    /**
+ * Send all packets currently inside the Go-Back-N sender window.
+ *
+ * The window contains packets from base up to, but not including,
+ * getWindowEnd().
+ */
+private void sendWindow() throws Exception {
+    int windowEnd = getWindowEnd();
+
+    while (nextSequenceNumber < windowEnd) {
+        Packet packet = packetBuffer.get(nextSequenceNumber);
+
+        sender.sendPacket(packet);
+
+        stats.totalPacketsSent++;
+        stats.totalBytesSent += Packet.HEADER_SIZE
+                + packet.getPayloadLength();
+
+        nextSequenceNumber++;
+    }
+}
 
     @Override
     public byte[] receiveData() throws Exception {
