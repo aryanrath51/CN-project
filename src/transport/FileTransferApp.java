@@ -28,11 +28,15 @@ public class FileTransferApp {
     }
 
     public static void main(String[] args) {
-        File file = new File("test10mb.bin");
+        if (args.length < 1) {
+            System.out.println("Usage: java transport.FileTransferApp <filepath>");
+            return;
+        }
+        File file = new File(args[0]);
         if (file.exists()) {
-            System.out.println("Generated SHA-256 Hash: " + getFileChecksum(file));
+            System.out.println("SHA-256 Hash for " + file.getName() + ": " + getFileChecksum(file));
         } else {
-            System.out.println("Test file not found!");
+            System.out.println("File not found: " + args[0]);
         }
     }
 }
