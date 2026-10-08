@@ -3,7 +3,9 @@ package arq;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import packet.CorruptPacketException;
 import packet.Packet;
+import packet.PacketSerializer;
 import packet.PacketType;
 import transport.UDPReceiver;
 import transport.UDPSender;
@@ -149,9 +151,7 @@ public class GoBackN implements ARQProtocol {
             sender.sendPacket(packet);
 
             stats.totalPacketsSent++;
-            stats.totalBytesSent +=
-                    Packet.HEADER_SIZE + packet.getPayloadLength();
-
+            stats.totalBytesSent += Packet.HEADER_SIZE + packet.getPayloadLength();
             nextSequenceNumber++;
         }
     }
@@ -191,6 +191,21 @@ public class GoBackN implements ARQProtocol {
         // The window has moved forward, so new packets may now be sent.
         sendWindow();
     }
+
+    private void receiveAndProcessAck(long timeoutMs) throws Exception {
+    byte[] rawData = receiver.receive(timeoutMs);
+
+    if (rawData == null) {
+        return;
+    }
+
+    try {
+        Packet packet = PacketSerializer.deserialize(rawData);
+        processAck(packet);
+    } catch (CorruptPacketException e) {
+        stats.totalCorruptDrops++;
+    }
+}
 
     @Override
     public byte[] receiveData() throws Exception {
