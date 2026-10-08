@@ -28,7 +28,11 @@ public class FileTransferApp {
     }
 
     public static void main(String[] args) {
-        System.out.println("File Transfer App & SHA-256 Verification Module Initialized.");
-        // Test file path yahan denge
+        File file = new File("test10mb.bin");
+        if (file.exists()) {
+            System.out.println("Generated SHA-256 Hash: " + getFileChecksum(file));
+        } else {
+            System.out.println("Test file not found!");
+        }
     }
 }
