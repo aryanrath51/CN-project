@@ -58,23 +58,37 @@ public class GoBackN implements ARQProtocol {
         this.retransmissionTimeoutMs = retransmissionTimeoutMs;
     }
 
-    @Override
-    public void sendData(byte[] fileData) throws Exception {
-        if (fileData == null) {
-            throw new IllegalArgumentException("fileData cannot be null");
-        }
 
-        // Reset sender state for a new transfer.
-        packetBuffer.clear();
-        base = 0;
-        nextSequenceNumber = 0;
-
-        // Split the file into DATA packets.
-        packetBuffer.addAll(fragmentData(fileData));
-
-        // Send the packets currently allowed by the GBN window.
-        sendWindow();
+@Override
+public void sendData(byte[] fileData) throws Exception {
+    if (fileData == null) {
+        throw new IllegalArgumentException("fileData cannot be null");
     }
+
+    packetBuffer.clear();
+    base = 0;
+    nextSequenceNumber = 0;
+
+    packetBuffer.addAll(fragmentData(fileData));
+
+    stats.markStart();
+
+    try {
+        sendWindow();
+
+        while (base < packetBuffer.size()) {
+          boolean timedOut =
+        receiveAndProcessAck(retransmissionTimeoutMs);
+
+if (timedOut && base < nextSequenceNumber) {
+    retransmitOutstandingPackets();
+}
+        }
+    } finally {
+        stats.markEnd();
+    }
+}
+
 
     /**
      * Split the complete file into packets whose payload does not exceed
@@ -155,6 +169,20 @@ public class GoBackN implements ARQProtocol {
             nextSequenceNumber++;
         }
     }
+    
+private void retransmitOutstandingPackets() throws Exception {
+    for (int seq = base; seq < nextSequenceNumber; seq++) {
+        Packet packet = packetBuffer.get(seq);
+
+        sender.sendPacket(packet);
+
+        stats.totalPacketsSent++;
+        stats.totalRetransmissions++;
+        stats.totalBytesSent +=
+                Packet.HEADER_SIZE + packet.getPayloadLength();
+    }
+}
+
 
     /**
      * Process a cumulative ACK received from the receiver.
@@ -192,11 +220,12 @@ public class GoBackN implements ARQProtocol {
         sendWindow();
     }
 
-    private void receiveAndProcessAck(long timeoutMs) throws Exception {
+ 
+private boolean receiveAndProcessAck(long timeoutMs) throws Exception {
     byte[] rawData = receiver.receive(timeoutMs);
 
     if (rawData == null) {
-        return;
+        return true; // Receive timeout
     }
 
     try {
@@ -205,7 +234,10 @@ public class GoBackN implements ARQProtocol {
     } catch (CorruptPacketException e) {
         stats.totalCorruptDrops++;
     }
+
+    return false; // A datagram arrived; no timeout
 }
+
 
     @Override
     public byte[] receiveData() throws Exception {
