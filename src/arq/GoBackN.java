@@ -28,6 +28,8 @@ public class GoBackN implements ARQProtocol {
 
     // Packets created from the current file transfer.
     private final List<Packet> packetBuffer = new ArrayList<>();
+    // Holds payloads accepted by the receiver, in sequence order.
+private final List<byte[]> receivedChunks = new ArrayList<>();
 
     public GoBackN(
             UDPSender sender,
@@ -239,11 +241,80 @@ private boolean receiveAndProcessAck(long timeoutMs) throws Exception {
 }
 
 
-    @Override
-    public byte[] receiveData() throws Exception {
-        // Go-Back-N receiver implementation will be added incrementally.
-        return new byte[0];
+    
+@Override
+public byte[] receiveData() throws Exception {
+    receivedChunks.clear();
+    expectedSequenceNumber = 0;
+
+    while (true) {
+        byte[] rawData = receiver.receive(retransmissionTimeoutMs);
+
+        if (rawData == null) {
+            throw new java.net.SocketTimeoutException(
+                    "Timed out while waiting for DATA");
+        }
+
+        Packet packet;
+
+        try {
+    packet = PacketSerializer.deserialize(rawData);
+} catch (CorruptPacketException e) {
+    stats.totalCorruptDrops++;
+
+    if (expectedSequenceNumber > 0) {
+        sender.sendPacket(
+                Packet.createAck(expectedSequenceNumber - 1));
     }
+
+    continue;
+}
+
+        if (packet.getType() != PacketType.DATA) {
+            continue;
+        }
+
+        stats.totalPacketsReceived++;
+
+        int sequenceNumber = packet.getSequenceNumber();
+
+        if (sequenceNumber == expectedSequenceNumber) {
+            receivedChunks.add(packet.getPayload());
+            stats.totalBytesDelivered += packet.getPayloadLength();
+            expectedSequenceNumber++;
+
+            // ACK the most recently accepted in-order packet.
+            sender.sendPacket(Packet.createAck(sequenceNumber));
+
+            if (packet.isLastFragment()) {
+                int totalLength = receivedChunks.stream()
+                        .mapToInt(chunk -> chunk.length)
+                        .sum();
+
+                byte[] result = new byte[totalLength];
+                int offset = 0;
+
+                for (byte[] chunk : receivedChunks) {
+                    System.arraycopy(
+                            chunk, 0, result, offset, chunk.length);
+                    offset += chunk.length;
+                }
+
+                return result;
+            }
+        } else {
+            // Go-Back-N discards out-of-order and duplicate packets.
+            stats.totalDuplicatesReceived++;
+
+            // Repeat the ACK for the last correctly received packet.
+            if (expectedSequenceNumber > 0) {
+                sender.sendPacket(
+                        Packet.createAck(expectedSequenceNumber - 1));
+            }
+        }
+    }
+}
+
 
     @Override
     public ProtocolStats getStats() {
