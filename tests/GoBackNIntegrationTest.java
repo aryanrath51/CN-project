@@ -41,7 +41,7 @@ public class GoBackNIntegrationTest {
                     sender, senderReceiver, 4, 500);
 
             GoBackN receiverProtocol = new GoBackN(
-                    receiverSender, receiverReceiver, 4, 15000);
+                    receiverSender, receiverReceiver, 4, 1000);
 
             byte[] original = new byte[5000];
 

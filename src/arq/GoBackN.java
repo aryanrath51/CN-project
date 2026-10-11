@@ -25,6 +25,7 @@ public class GoBackN implements ARQProtocol {
 
     // Receiver state
     private int expectedSequenceNumber = 0;
+    private int lastAcceptedSequenceNumber = -1;
 
     // Packets created from the current file transfer.
     private final List<Packet> packetBuffer = new ArrayList<>();
@@ -171,7 +172,7 @@ if (timedOut && base < nextSequenceNumber) {
             nextSequenceNumber++;
         }
     }
-    
+
 private void retransmitOutstandingPackets() throws Exception {
     for (int seq = base; seq < nextSequenceNumber; seq++) {
         Packet packet = packetBuffer.get(seq);
@@ -222,7 +223,7 @@ private void retransmitOutstandingPackets() throws Exception {
         sendWindow();
     }
 
- 
+
 private boolean receiveAndProcessAck(long timeoutMs) throws Exception {
     byte[] rawData = receiver.receive(timeoutMs);
 
@@ -241,11 +242,12 @@ private boolean receiveAndProcessAck(long timeoutMs) throws Exception {
 }
 
 
-    
+
 @Override
 public byte[] receiveData() throws Exception {
     receivedChunks.clear();
     expectedSequenceNumber = 0;
+    lastAcceptedSequenceNumber = -1;
 
     while (true) {
         byte[] rawData = receiver.receive(retransmissionTimeoutMs);
@@ -280,28 +282,57 @@ public byte[] receiveData() throws Exception {
 
         if (sequenceNumber == expectedSequenceNumber) {
             receivedChunks.add(packet.getPayload());
+            lastAcceptedSequenceNumber = sequenceNumber;
             stats.totalBytesDelivered += packet.getPayloadLength();
             expectedSequenceNumber++;
 
             // ACK the most recently accepted in-order packet.
             sender.sendPacket(Packet.createAck(sequenceNumber));
 
-            if (packet.isLastFragment()) {
-                int totalLength = receivedChunks.stream()
-                        .mapToInt(chunk -> chunk.length)
-                        .sum();
 
-                byte[] result = new byte[totalLength];
-                int offset = 0;
+if (packet.isLastFragment()) {
+    
+    int totalLength = receivedChunks.stream()
+            .mapToInt(chunk -> chunk.length)
+            .sum();
 
-                for (byte[] chunk : receivedChunks) {
-                    System.arraycopy(
-                            chunk, 0, result, offset, chunk.length);
-                    offset += chunk.length;
-                }
+    byte[] result = new byte[totalLength];
+    int offset = 0;
 
-                return result;
+    for (byte[] chunk : receivedChunks) {
+        System.arraycopy(chunk, 0, result, offset, chunk.length);
+        offset += chunk.length;
+    }
+
+    // Allow time for a retransmitted final packet if its ACK was lost.
+    long lingerMs =  Math.max(retransmissionTimeoutMs * 2, 1000);
+    long deadline = System.nanoTime() + lingerMs * 1_000_000L;
+
+    while (System.nanoTime() < deadline) {
+        long remainingMs = Math.max(
+                1, (deadline - System.nanoTime()) / 1_000_000L);
+
+        byte[] duplicateRaw = receiver.receive(remainingMs);
+        if (duplicateRaw == null) {
+            break;
+        }
+
+        try {
+            Packet duplicate = PacketSerializer.deserialize(duplicateRaw);
+
+            if (duplicate.getType() == PacketType.DATA
+                    && duplicate.getSequenceNumber() == lastAcceptedSequenceNumber) {
+                sender.sendPacket(
+                        Packet.createAck(lastAcceptedSequenceNumber));
             }
+        } catch (CorruptPacketException ignored) {
+            stats.totalCorruptDrops++;
+        }
+    }
+
+    return result;
+}
+
         } else {
             // Go-Back-N discards out-of-order and duplicate packets.
             stats.totalDuplicatesReceived++;
