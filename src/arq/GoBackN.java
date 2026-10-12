@@ -1,5 +1,6 @@
 package arq;
 
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -29,8 +30,9 @@ public class GoBackN implements ARQProtocol {
 
     // Packets created from the current file transfer.
     private final List<Packet> packetBuffer = new ArrayList<>();
+
     // Holds payloads accepted by the receiver, in sequence order.
-private final List<byte[]> receivedChunks = new ArrayList<>();
+    private final List<byte[]> receivedChunks = new ArrayList<>();
 
     public GoBackN(
             UDPSender sender,
@@ -41,15 +43,12 @@ private final List<byte[]> receivedChunks = new ArrayList<>();
         if (sender == null) {
             throw new IllegalArgumentException("sender cannot be null");
         }
-
         if (receiver == null) {
             throw new IllegalArgumentException("receiver cannot be null");
         }
-
         if (windowSize <= 0) {
             throw new IllegalArgumentException("windowSize must be positive");
         }
-
         if (retransmissionTimeoutMs <= 0) {
             throw new IllegalArgumentException(
                     "retransmissionTimeoutMs must be positive");
@@ -61,37 +60,33 @@ private final List<byte[]> receivedChunks = new ArrayList<>();
         this.retransmissionTimeoutMs = retransmissionTimeoutMs;
     }
 
-
-@Override
-public void sendData(byte[] fileData) throws Exception {
-    if (fileData == null) {
-        throw new IllegalArgumentException("fileData cannot be null");
-    }
-
-    packetBuffer.clear();
-    base = 0;
-    nextSequenceNumber = 0;
-
-    packetBuffer.addAll(fragmentData(fileData));
-
-    stats.markStart();
-
-    try {
-        sendWindow();
-
-        while (base < packetBuffer.size()) {
-          boolean timedOut =
-        receiveAndProcessAck(retransmissionTimeoutMs);
-
-if (timedOut && base < nextSequenceNumber) {
-    retransmitOutstandingPackets();
-}
+    @Override
+    public void sendData(byte[] fileData) throws Exception {
+        if (fileData == null) {
+            throw new IllegalArgumentException("fileData cannot be null");
         }
-    } finally {
-        stats.markEnd();
-    }
-}
 
+        packetBuffer.clear();
+        base = 0;
+        nextSequenceNumber = 0;
+        packetBuffer.addAll(fragmentData(fileData));
+
+        stats.markStart();
+
+        try {
+            sendWindow();
+
+            while (base < packetBuffer.size()) {
+                boolean timedOut = receiveAndProcessAck(retransmissionTimeoutMs);
+
+                if (timedOut && base < nextSequenceNumber) {
+                    retransmitOutstandingPackets();
+                }
+            }
+        } finally {
+            stats.markEnd();
+        }
+    }
 
     /**
      * Split the complete file into packets whose payload does not exceed
@@ -102,11 +97,7 @@ if (timedOut && base < nextSequenceNumber) {
 
         // A zero-length file still needs one final DATA packet.
         if (fileData.length == 0) {
-            packets.add(Packet.createData(
-                    0,
-                    new byte[0],
-                    true
-            ));
+            packets.add(Packet.createData(0, new byte[0], true));
             return packets;
         }
 
@@ -117,26 +108,15 @@ if (timedOut && base < nextSequenceNumber) {
              offset += Packet.MAX_PAYLOAD_SIZE) {
 
             int remaining = fileData.length - offset;
-
-            int payloadSize = Math.min(
-                    Packet.MAX_PAYLOAD_SIZE,
-                    remaining
-            );
+            int payloadSize = Math.min(Packet.MAX_PAYLOAD_SIZE, remaining);
 
             byte[] payload = Arrays.copyOfRange(
-                    fileData,
-                    offset,
-                    offset + payloadSize
-            );
+                    fileData, offset, offset + payloadSize);
 
-            boolean isLastFragment =
-                    offset + payloadSize >= fileData.length;
+            boolean isLastFragment = offset + payloadSize >= fileData.length;
 
             Packet packet = Packet.createData(
-                    sequenceNumber,
-                    payload,
-                    isLastFragment
-            );
+                    sequenceNumber, payload, isLastFragment);
 
             packets.add(packet);
             sequenceNumber++;
@@ -150,10 +130,7 @@ if (timedOut && base < nextSequenceNumber) {
      * allowed by the Go-Back-N sender window.
      */
     private int getWindowEnd() {
-        return Math.min(
-                base + windowSize,
-                packetBuffer.size()
-        );
+        return Math.min(base + windowSize, packetBuffer.size());
     }
 
     /**
@@ -164,7 +141,6 @@ if (timedOut && base < nextSequenceNumber) {
 
         while (nextSequenceNumber < windowEnd) {
             Packet packet = packetBuffer.get(nextSequenceNumber);
-
             sender.sendPacket(packet);
 
             stats.totalPacketsSent++;
@@ -173,19 +149,16 @@ if (timedOut && base < nextSequenceNumber) {
         }
     }
 
-private void retransmitOutstandingPackets() throws Exception {
-    for (int seq = base; seq < nextSequenceNumber; seq++) {
-        Packet packet = packetBuffer.get(seq);
+    private void retransmitOutstandingPackets() throws Exception {
+        for (int seq = base; seq < nextSequenceNumber; seq++) {
+            Packet packet = packetBuffer.get(seq);
+            sender.sendPacket(packet);
 
-        sender.sendPacket(packet);
-
-        stats.totalPacketsSent++;
-        stats.totalRetransmissions++;
-        stats.totalBytesSent +=
-                Packet.HEADER_SIZE + packet.getPayloadLength();
+            stats.totalPacketsSent++;
+            stats.totalRetransmissions++;
+            stats.totalBytesSent += Packet.HEADER_SIZE + packet.getPayloadLength();
+        }
     }
-}
-
 
     /**
      * Process a cumulative ACK received from the receiver.
@@ -194,16 +167,11 @@ private void retransmitOutstandingPackets() throws Exception {
      * all earlier packets have been received successfully.
      */
     private void processAck(Packet ackPacket) throws Exception {
-        if (ackPacket == null) {
-            return;
-        }
-
-        if (ackPacket.getType() != PacketType.ACK) {
+        if (ackPacket == null || ackPacket.getType() != PacketType.ACK) {
             return;
         }
 
         stats.totalAcksReceived++;
-
         int ackNumber = ackPacket.getAckNumber();
 
         // Ignore ACKs for packets that have not been sent yet.
@@ -223,129 +191,129 @@ private void retransmitOutstandingPackets() throws Exception {
         sendWindow();
     }
 
-
-private boolean receiveAndProcessAck(long timeoutMs) throws Exception {
-    byte[] rawData = receiver.receive(timeoutMs);
-
-    if (rawData == null) {
-        return true; // Receive timeout
-    }
-
-    try {
-        Packet packet = PacketSerializer.deserialize(rawData);
-        processAck(packet);
-    } catch (CorruptPacketException e) {
-        stats.totalCorruptDrops++;
-    }
-
-    return false; // A datagram arrived; no timeout
-}
-
-
-
-@Override
-public byte[] receiveData() throws Exception {
-    receivedChunks.clear();
-    expectedSequenceNumber = 0;
-    lastAcceptedSequenceNumber = -1;
-
-    while (true) {
-        byte[] rawData = receiver.receive(retransmissionTimeoutMs);
+    private boolean receiveAndProcessAck(long timeoutMs) throws Exception {
+        byte[] rawData = receiver.receive(timeoutMs);
 
         if (rawData == null) {
-            throw new java.net.SocketTimeoutException(
-                    "Timed out while waiting for DATA");
-        }
-
-        Packet packet;
-
-        try {
-    packet = PacketSerializer.deserialize(rawData);
-} catch (CorruptPacketException e) {
-    stats.totalCorruptDrops++;
-
-    if (expectedSequenceNumber > 0) {
-        sender.sendPacket(
-                Packet.createAck(expectedSequenceNumber - 1));
-    }
-
-    continue;
-}
-
-        if (packet.getType() != PacketType.DATA) {
-            continue;
-        }
-
-        stats.totalPacketsReceived++;
-
-        int sequenceNumber = packet.getSequenceNumber();
-
-        if (sequenceNumber == expectedSequenceNumber) {
-            receivedChunks.add(packet.getPayload());
-            lastAcceptedSequenceNumber = sequenceNumber;
-            stats.totalBytesDelivered += packet.getPayloadLength();
-            expectedSequenceNumber++;
-
-            // ACK the most recently accepted in-order packet.
-            sender.sendPacket(Packet.createAck(sequenceNumber));
-
-
-if (packet.isLastFragment()) {
-    
-    int totalLength = receivedChunks.stream()
-            .mapToInt(chunk -> chunk.length)
-            .sum();
-
-    byte[] result = new byte[totalLength];
-    int offset = 0;
-
-    for (byte[] chunk : receivedChunks) {
-        System.arraycopy(chunk, 0, result, offset, chunk.length);
-        offset += chunk.length;
-    }
-
-    // Allow time for a retransmitted final packet if its ACK was lost.
-    long lingerMs =  Math.max(retransmissionTimeoutMs * 2, 1000);
-    long deadline = System.nanoTime() + lingerMs * 1_000_000L;
-
-    while (System.nanoTime() < deadline) {
-        long remainingMs = Math.max(
-                1, (deadline - System.nanoTime()) / 1_000_000L);
-
-        byte[] duplicateRaw = receiver.receive(remainingMs);
-        if (duplicateRaw == null) {
-            break;
+            return true; // Receive timeout
         }
 
         try {
-            Packet duplicate = PacketSerializer.deserialize(duplicateRaw);
-
-            if (duplicate.getType() == PacketType.DATA
-                    && duplicate.getSequenceNumber() == lastAcceptedSequenceNumber) {
-                sender.sendPacket(
-                        Packet.createAck(lastAcceptedSequenceNumber));
-            }
-        } catch (CorruptPacketException ignored) {
+            Packet packet = PacketSerializer.deserialize(rawData);
+            processAck(packet);
+        } catch (CorruptPacketException e) {
             stats.totalCorruptDrops++;
         }
+
+        return false; // A datagram arrived; no timeout
     }
 
-    return result;
-}
+    @Override
+    public byte[] receiveData() throws Exception {
+        receivedChunks.clear();
+        expectedSequenceNumber = 0;
+        lastAcceptedSequenceNumber = -1;
 
-        } else {
-            // Go-Back-N discards out-of-order and duplicate packets.
-            stats.totalDuplicatesReceived++;
+        while (true) {
+            byte[] rawData = receiver.receive(retransmissionTimeoutMs);
 
-            // Repeat the ACK for the last correctly received packet.
-            if (expectedSequenceNumber > 0) {
-                sender.sendPacket(
-                        Packet.createAck(expectedSequenceNumber - 1));
+            if (rawData == null) {
+                throw new SocketTimeoutException("Timed out while waiting for DATA");
+            }
+
+            Packet packet;
+
+            try {
+                packet = PacketSerializer.deserialize(rawData);
+            } catch (CorruptPacketException e) {
+                stats.totalCorruptDrops++;
+
+                if (expectedSequenceNumber > 0) {
+                    sender.sendPacket(
+                            Packet.createAck(expectedSequenceNumber - 1));
+                }
+                continue;
+            }
+
+            if (packet.getType() != PacketType.DATA) {
+                continue;
+            }
+
+            stats.totalPacketsReceived++;
+            int sequenceNumber = packet.getSequenceNumber();
+
+            if (sequenceNumber == expectedSequenceNumber) {
+                receivedChunks.add(packet.getPayload());
+                lastAcceptedSequenceNumber = sequenceNumber;
+                stats.totalBytesDelivered += packet.getPayloadLength();
+                expectedSequenceNumber++;
+
+                // ACK the most recently accepted in-order packet.
+                sender.sendPacket(Packet.createAck(sequenceNumber));
+
+                if (packet.isLastFragment()) {
+                    int totalLength = receivedChunks.stream()
+                            .mapToInt(chunk -> chunk.length)
+                            .sum();
+
+                    byte[] result = new byte[totalLength];
+                    int offset = 0;
+
+                    for (byte[] chunk : receivedChunks) {
+                        System.arraycopy(chunk, 0, result, offset, chunk.length);
+                        offset += chunk.length;
+                    }
+
+                    // Allow time for a retransmitted final packet if its ACK was lost.
+                    long lingerMs = Math.max(retransmissionTimeoutMs * 2, 1000);
+                    long deadline = System.nanoTime() + lingerMs * 1_000_000L;
+
+                    while (System.nanoTime() < deadline) {
+                        long remainingMs = Math.max(
+                                1, (deadline - System.nanoTime()) / 1_000_000L);
+
+                        byte[] duplicateRaw = receiver.receive(remainingMs);
+                        if (duplicateRaw == null) {
+                            // The receive call may time out before the linger deadline.
+                            // Continue checking until the full linger interval expires.
+                            continue;
+                        }
+
+                        try {
+                            Packet duplicate =
+                                    PacketSerializer.deserialize(duplicateRaw);
+
+                            System.out.println(
+                                    "RECEIVER LINGER: received "
+                                    + duplicate.getType() + ", seq="
+                                    + duplicate.getSequenceNumber());
+
+                            if (duplicate.getType() == PacketType.DATA
+                                    && duplicate.getSequenceNumber()
+                                    == lastAcceptedSequenceNumber) {
+                                stats.totalDuplicatesReceived++;
+                                sender.sendPacket(
+                                        Packet.createAck(lastAcceptedSequenceNumber));
+                            }
+                        } catch (CorruptPacketException ignored) {
+                            stats.totalCorruptDrops++;
+                        }
+                    }
+
+                    return result;
+                }
+            } else {
+                // Go-Back-N discards out-of-order and duplicate packets.
+                stats.totalDuplicatesReceived++;
+
+                // Repeat the ACK for the last correctly received packet.
+                if (expectedSequenceNumber > 0) {
+                    sender.sendPacket(
+                            Packet.createAck(expectedSequenceNumber - 1));
+                }
             }
         }
     }
-}
-
 
     @Override
     public ProtocolStats getStats() {
