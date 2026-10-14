@@ -1,6 +1,5 @@
 
 import arq.GoBackN;
-import packet.Packet;
 import transport.UDPSender;
 import transport.UDPReceiver;
 
@@ -95,14 +94,40 @@ public class GoBackNIntegrationTest {
                         "Received bytes differ from original file");
             }
 
+            // Verify the sender reached its final state.
+            if (senderProtocol.getSenderState()
+                    != GoBackN.SenderState.COMPLETED) {
+                throw new AssertionError(
+                        "Sender did not reach COMPLETED state: "
+                                + senderProtocol.getSenderState());
+            }
+
+            // Verify the receiver reached its final state.
+            if (receiverProtocol.getReceiverState()
+                    != GoBackN.ReceiverState.COMPLETED) {
+                throw new AssertionError(
+                        "Receiver did not reach COMPLETED state: "
+                                + receiverProtocol.getReceiverState());
+            }
+
             System.out.println("PASS: Go-Back-N transfer succeeded");
-            System.out.println("Bytes transferred: " + received.get().length);
-            System.out.println("Sender statistics: "
-                    + senderProtocol.getStats());
+            System.out.println(
+                    "PASS: Sender state = "
+                            + senderProtocol.getSenderState());
+            System.out.println(
+                    "PASS: Receiver state = "
+                            + receiverProtocol.getReceiverState());
+            System.out.println(
+                    "Bytes transferred: " + received.get().length);
+            System.out.println(
+                    "Sender statistics: " + senderProtocol.getStats());
 
         } finally {
             senderReceiver.stop();
             receiverReceiver.stop();
+            senderSocket.close();
+            receiverSocket.close();
         }
     }
 }
+
