@@ -154,7 +154,6 @@ public class GoBackN implements ARQProtocol {
             Packet packet = packetBuffer.get(seq);
             sender.sendPacket(packet);
 
-            stats.totalPacketsSent++;
             stats.totalRetransmissions++;
             stats.totalBytesSent += Packet.HEADER_SIZE + packet.getPayloadLength();
         }
