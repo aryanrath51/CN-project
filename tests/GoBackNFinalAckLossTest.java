@@ -57,10 +57,8 @@ public class GoBackNFinalAckLossTest {
             senderReceiver = new UDPReceiver(senderSocket, 1024);
             receiverUdp = new UDPReceiver(receiverSocket, 1024);
 
-            Thread senderUdpThread =
-                    new Thread(senderReceiver, "sender-udp-receiver");
-            Thread receiverUdpThread =
-                    new Thread(receiverUdp, "receiver-udp-receiver");
+            Thread senderUdpThread = new Thread(senderReceiver, "sender-udp-receiver");
+            Thread receiverUdpThread = new Thread(receiverUdp, "receiver-udp-receiver");
 
             senderUdpThread.setDaemon(true);
             receiverUdpThread.setDaemon(true);

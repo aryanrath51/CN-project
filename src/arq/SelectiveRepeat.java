@@ -132,11 +132,10 @@ public class SelectiveRepeat implements ARQProtocol {
     @Override
     public byte[] receiveData() throws Exception {
         Map<Integer, byte[]> receiveBuffer = new HashMap<>();
-        Map<Integer, Boolean> isLastPacketMap = new HashMap<>();
         int expectedSequenceNumber = 0;
-        int highestSequenceReceived = -1;
-        boolean lastPacketReceived = false;
         int totalExpectedPackets = -1;
+        boolean lastPacketReceived = false;
+        int lastAcceptedSequenceNumber = -1;
 
         try {
             while (true) {
@@ -166,6 +165,7 @@ public class SelectiveRepeat implements ARQProtocol {
                 if (packet.isLastFragment()) {
                     lastPacketReceived = true;
                     totalExpectedPackets = seqNum + 1;
+                    lastAcceptedSequenceNumber = seqNum;
                 }
 
                 // Selective Repeat Receiver Buffer Logic
@@ -175,7 +175,6 @@ public class SelectiveRepeat implements ARQProtocol {
                         stats.totalBytesDelivered += packet.getPayloadLength();
                     }
                 } else if (seqNum < expectedSequenceNumber) {
-                    // Duplicate packet, already accepted
                     stats.totalDuplicatesReceived++;
                 }
 
@@ -198,6 +197,28 @@ public class SelectiveRepeat implements ARQProtocol {
                         System.arraycopy(chunk, 0, result, offset, chunk.length);
                         offset += chunk.length;
                     }
+
+                    // LINGER PHASE: Stay alive briefly to re-ACK if the final ACK was lost
+                    long lingerMs = Math.max(retransmissionTimeoutMs * 2, 1000);
+                    long deadline = System.nanoTime() + lingerMs * 1_000_000L;
+
+                    while (System.nanoTime() < deadline) {
+                        long remainingMs = Math.max(1, (deadline - System.nanoTime()) / 1_000_000L);
+                        byte[] duplicateRaw = receiver.receive(remainingMs);
+                        if (duplicateRaw == null) continue;
+
+                        try {
+                            Packet duplicate = PacketSerializer.deserialize(duplicateRaw);
+                            if (duplicate.getType() == PacketType.DATA
+                                    && duplicate.getSequenceNumber() == lastAcceptedSequenceNumber) {
+                                stats.totalDuplicatesReceived++;
+                                sender.sendPacket(Packet.createAck(lastAcceptedSequenceNumber));
+                            }
+                        } catch (CorruptPacketException e) {
+                            stats.totalCorruptDrops++;
+                        }
+                    }
+
                     return result;
                 }
             }
