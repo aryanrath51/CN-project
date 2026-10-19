@@ -31,3 +31,10 @@ test_output/
 __pycache__/
 *.pyc
 .venv/
+
+# Local Python Environment Artifacts
+Lib/
+Scripts/
+share/
+include/
+pyvenv.cfg
