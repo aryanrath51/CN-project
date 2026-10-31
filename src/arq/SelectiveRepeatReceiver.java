@@ -38,7 +38,6 @@ public class SelectiveRepeatReceiver {
                 DatagramPacket synAckPacket = new DatagramPacket(synAckData, synAckData.length, clientAddress, clientPort);
                 socket.send(synAckPacket);
 
-                // Wait for final ACK from sender
                 socket.setSoTimeout(2000);
                 try {
                     byte[] ackBuffer = new byte[1024];
@@ -79,16 +78,19 @@ public class SelectiveRepeatReceiver {
         }
     }
 
+    // --- STRETCH GOAL: Flow Control (Available Window Calculation) ---
+    public int getAvailableWindow() {
+        // Returns remaining free slots in the receiver's out-of-order buffer map
+        return windowSize - buffer.size();
+    }
+
     // Process an incoming packet
     public boolean addPacket(int seqNum, byte[] payload) {
-        // If packet is within the acceptable receive window
         if (seqNum >= expectedSeqNum && seqNum < expectedSeqNum + windowSize) {
-            // Buffer the packet if it's out of order
             if (!buffer.containsKey(seqNum)) {
                 buffer.put(seqNum, payload);
             }
 
-            // Deliver contiguous packets in order
             while (buffer.containsKey(expectedSeqNum)) {
                 byte[] data = buffer.get(expectedSeqNum);
                 deliverData(expectedSeqNum, data);
@@ -97,16 +99,13 @@ public class SelectiveRepeatReceiver {
             }
             return true;
         } else if (seqNum < expectedSeqNum) {
-            // Already delivered packet, just re-acknowledge it
             return true;
         }
         
-        // Outside window, ignore
         return false;
     }
 
     private void deliverData(int seqNum, byte[] data) {
-        // Here is where you pass the ordered byte data to Priyanshi's file writer module
         System.out.println("Delivering packet in order: " + seqNum);
     }
 }

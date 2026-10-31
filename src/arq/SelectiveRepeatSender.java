@@ -14,6 +14,7 @@ public class SelectiveRepeatSender {
     private int nextSeqNum;
     private Map<Integer, Long> sentTimestamps;
     private AdaptiveRTO rtoEngine;
+    private int currentReceiverWindow; // STRETCH GOAL: Flow control tracking
 
     public SelectiveRepeatSender(int windowSize) {
         this.windowSize = windowSize;
@@ -21,13 +22,13 @@ public class SelectiveRepeatSender {
         this.nextSeqNum = 0;
         this.sentTimestamps = new HashMap<>();
         this.rtoEngine = new AdaptiveRTO(1000.0); // Start with 1 second initial RTO
+        this.currentReceiverWindow = windowSize;  // Initially match default window
     }
 
     // --- STRETCH GOAL: 3-Way Handshake (Client Side) ---
     public boolean performHandshake(DatagramSocket socket, InetAddress address, int port) throws IOException {
         System.out.println("[Handshake] Initiating connection (SYN)...");
         
-        // Step 1: Send SYN packet (using seqNum -1 or a control flag representation)
         byte[] synData = "SYN".getBytes();
         DatagramPacket synPacket = new DatagramPacket(synData, synData.length, address, port);
         socket.send(synPacket);
@@ -35,7 +36,6 @@ public class SelectiveRepeatSender {
         socket.setSoTimeout(2000); // 2 second timeout for handshake response
 
         try {
-            // Step 2: Receive SYN-ACK from receiver
             byte[] buffer = new byte[1024];
             DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
             socket.receive(responsePacket);
@@ -44,7 +44,6 @@ public class SelectiveRepeatSender {
             if (responseStr.equals("SYN-ACK")) {
                 System.out.println("[Handshake] Received SYN-ACK. Sending final ACK...");
 
-                // Step 3: Send final ACK
                 byte[] ackData = "ACK".getBytes();
                 DatagramPacket finalAckPacket = new DatagramPacket(ackData, ackData.length, address, port);
                 socket.send(finalAckPacket);
@@ -79,9 +78,18 @@ public class SelectiveRepeatSender {
         }
     }
 
-    // Check if we can send a new packet within our window
+    // --- STRETCH GOAL: Flow Control (Dynamic Window Adjustment) ---
+    public void updateReceiverWindow(int receiverWindow) {
+        this.currentReceiverWindow = receiverWindow;
+        if (receiverWindow < this.windowSize) {
+            System.out.println("[Flow Control] Receiver buffer space low. Throttling sender window to: " + receiverWindow);
+        }
+    }
+
+    // Check if we can send a new packet within our window and receiver's available window
     public boolean canSend() {
-        return nextSeqNum < base + windowSize;
+        int effectiveWindow = Math.min(windowSize, currentReceiverWindow);
+        return nextSeqNum < base + effectiveWindow;
     }
 
     public void packetSent(int seqNum) {
@@ -95,16 +103,15 @@ public class SelectiveRepeatSender {
             long sendTime = sentTimestamps.get(ackNum);
             double sampleRtt = System.currentTimeMillis() - sendTime;
             
-            // Update RTO engine (assuming first transmission for simplicity here)
+            // Update RTO engine using Jacobson/Karels and Karn's algorithm
             rtoEngine.updateRtt(sampleRtt, false);
             
             sentTimestamps.remove(ackNum);
 
             // Slide window base forward if base packet is acknowledged
             while (!sentTimestamps.containsKey(base) && base < nextSeqNum) {
-                // Advance base past acknowledged chunks
                 if (sentTimestamps.isEmpty() && base < nextSeqNum) {
-                    base = nextSeqNum; // Catch up if window is clear
+                    base = nextSeqNum; 
                     break;
                 }
                 base++;
