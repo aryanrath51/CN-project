@@ -21,7 +21,7 @@ public class SelectiveRepeatReceiver {
     // --- STRETCH GOAL: Server-Side 3-Way Handshake Listener ---
     public boolean listenForHandshake(DatagramSocket socket) throws IOException {
         System.out.println("[Server] Waiting for client connection (SYN)...");
-        socket.setSoTimeout(0); // Wait indefinitely for connection request
+        socket.setSoTimeout(0);
 
         while (true) {
             byte[] bufferBytes = new byte[1024];
@@ -80,8 +80,36 @@ public class SelectiveRepeatReceiver {
 
     // --- STRETCH GOAL: Flow Control (Available Window Calculation) ---
     public int getAvailableWindow() {
-        // Returns remaining free slots in the receiver's out-of-order buffer map
         return windowSize - buffer.size();
+    }
+
+    // --- STRETCH GOAL: SACK Blocks (Generate non-contiguous ranges) ---
+    public String getSackBlockReport() {
+        if (buffer.isEmpty()) {
+            return "";
+        }
+        
+        StringBuilder sackReport = new StringBuilder();
+        int rangeStart = -1;
+        int prevSeq = -1;
+
+        for (int seq : buffer.keySet().stream().sorted().toList()) {
+            if (rangeStart == -1) {
+                rangeStart = seq;
+                prevSeq = seq;
+            } else if (seq == prevSeq + 1) {
+                prevSeq = seq;
+            } else {
+                sackReport.append("[").append(rangeStart).append("-").append(prevSeq).append("] ");
+                rangeStart = seq;
+                prevSeq = seq;
+            }
+        }
+        if (rangeStart != -1) {
+            sackReport.append("[").append(rangeStart).append("-").append(prevSeq).append("]");
+        }
+        
+        return sackReport.toString().trim();
     }
 
     // Process an incoming packet

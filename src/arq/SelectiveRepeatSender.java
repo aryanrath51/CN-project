@@ -5,7 +5,9 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class SelectiveRepeatSender {
@@ -14,7 +16,11 @@ public class SelectiveRepeatSender {
     private int nextSeqNum;
     private Map<Integer, Long> sentTimestamps;
     private AdaptiveRTO rtoEngine;
-    private int currentReceiverWindow; // STRETCH GOAL: Flow control tracking
+    private int currentReceiverWindow; // Flow control tracking
+
+    // --- STRETCH GOAL: Nagle-Style Coalescing Buffers ---
+    private List<Byte> nagleBuffer = new ArrayList<>();
+    private static final int MSS = 512; // Maximum Segment Size threshold
 
     public SelectiveRepeatSender(int windowSize) {
         this.windowSize = windowSize;
@@ -33,7 +39,7 @@ public class SelectiveRepeatSender {
         DatagramPacket synPacket = new DatagramPacket(synData, synData.length, address, port);
         socket.send(synPacket);
 
-        socket.setSoTimeout(2000); // 2 second timeout for handshake response
+        socket.setSoTimeout(2000);
 
         try {
             byte[] buffer = new byte[1024];
@@ -86,6 +92,66 @@ public class SelectiveRepeatSender {
         }
     }
 
+    // --- STRETCH GOAL: SACK Blocks (Process non-contiguous acknowledgements) ---
+    public void processSackReport(String sackReport) {
+        if (sackReport == null || sackReport.isEmpty()) {
+            return;
+        }
+        
+        System.out.println("[SACK] Processing SACK blocks from receiver: " + sackReport);
+        
+        String[] blocks = sackReport.replace("[", "").split("]");
+        for (String block : blocks) {
+            if (block.trim().isEmpty()) continue;
+            String[] bounds = block.trim().split("-");
+            if (bounds.length == 2) {
+                int start = Integer.parseInt(bounds[0].trim());
+                int end = Integer.parseInt(bounds[1].trim());
+                
+                for (int i = start; i <= end; i++) {
+                    if (sentTimestamps.containsKey(i)) {
+                        sentTimestamps.remove(i);
+                        System.out.println("[SACK] SACK block confirmed packet " + i + ", removing from retransmission queue.");
+                    }
+                }
+            }
+        }
+
+        while (!sentTimestamps.containsKey(base) && base < nextSeqNum) {
+            if (sentTimestamps.isEmpty() && base < nextSeqNum) {
+                base = nextSeqNum;
+                break;
+            }
+            base++;
+        }
+    }
+
+    // --- STRETCH GOAL: Nagle-Style Coalescing Buffer Methods ---
+    public boolean queuePayload(byte[] payload, List<byte[]> readyPackets) {
+        for (byte b : payload) {
+            nagleBuffer.add(b);
+        }
+        
+        // Coalesce until MSS threshold is hit
+        if (nagleBuffer.size() >= MSS) {
+            flushNagleBuffer(readyPackets);
+            return true;
+        }
+        return false;
+    }
+
+    public void flushNagleBuffer(List<byte[]> readyPackets) {
+        if (nagleBuffer.isEmpty()) return;
+        
+        byte[] chunk = new byte[nagleBuffer.size()];
+        for (int i = 0; i < nagleBuffer.size(); i++) {
+            chunk[i] = nagleBuffer.get(i);
+        }
+        readyPackets.add(chunk);
+        nagleBuffer.clear();
+        System.out.println("[Nagle] Coalesced and flushed packet of size: " + chunk.length + " bytes.");
+    }
+
     // Check if we can send a new packet within our window and receiver's available window
     public boolean canSend() {
         int effectiveWindow = Math.min(windowSize, currentReceiverWindow);
@@ -103,12 +169,9 @@ public class SelectiveRepeatSender {
             long sendTime = sentTimestamps.get(ackNum);
             double sampleRtt = System.currentTimeMillis() - sendTime;
             
-            // Update RTO engine using Jacobson/Karels and Karn's algorithm
             rtoEngine.updateRtt(sampleRtt, false);
-            
             sentTimestamps.remove(ackNum);
 
-            // Slide window base forward if base packet is acknowledged
             while (!sentTimestamps.containsKey(base) && base < nextSeqNum) {
                 if (sentTimestamps.isEmpty() && base < nextSeqNum) {
                     base = nextSeqNum; 
