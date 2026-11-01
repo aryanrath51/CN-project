@@ -18,6 +18,25 @@ public class SelectiveRepeatSender {
     private AdaptiveRTO rtoEngine;
     private int currentReceiverWindow; // Flow control tracking
 
+    // Called when an ACK is received from the receiver
+    public void receiveAck(int ackNum) {
+        if (sentTimestamps.containsKey(ackNum)) {
+            long sendTime = sentTimestamps.get(ackNum);
+            double sampleRtt = System.currentTimeMillis() - sendTime;
+            
+            rtoEngine.updateRtt(sampleRtt, false);
+            sentTimestamps.remove(ackNum);
+
+            while (!sentTimestamps.containsKey(base) && base < nextSeqNum) {
+                if (sentTimestamps.isEmpty() && base < nextSeqNum) {
+                    base = nextSeqNum; 
+                    break;
+                }
+                base++;
+            }
+        }
+    }
+
     // --- STRETCH GOAL: Nagle-Style Coalescing Buffers ---
     private List<Byte> nagleBuffer = new ArrayList<>();
     private static final int MSS = 512; // Maximum Segment Size threshold
@@ -161,24 +180,5 @@ public class SelectiveRepeatSender {
     public void packetSent(int seqNum) {
         sentTimestamps.put(seqNum, System.currentTimeMillis());
         nextSeqNum++;
-    }
-
-    // Called when an ACK is received from the receiver
-    public void receiveAck(int ackNum) {
-        if (sentTimestamps.containsKey(ackNum)) {
-            long sendTime = sentTimestamps.get(ackNum);
-            double sampleRtt = System.currentTimeMillis() - sendTime;
-            
-            rtoEngine.updateRtt(sampleRtt, false);
-            sentTimestamps.remove(ackNum);
-
-            while (!sentTimestamps.containsKey(base) && base < nextSeqNum) {
-                if (sentTimestamps.isEmpty() && base < nextSeqNum) {
-                    base = nextSeqNum; 
-                    break;
-                }
-                base++;
-            }
-        }
     }
 }
