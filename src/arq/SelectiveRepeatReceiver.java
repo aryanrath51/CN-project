@@ -18,7 +18,28 @@ public class SelectiveRepeatReceiver {
         this.buffer = new HashMap<>();
     }
 
-    // --- STRETCH GOAL: Server-Side 3-Way Handshake Listener ---
+    // Process an incoming packet
+    public boolean addPacket(int seqNum, byte[] payload) {
+        if (seqNum >= expectedSeqNum && seqNum < expectedSeqNum + windowSize) {
+            if (!buffer.containsKey(seqNum)) {
+                buffer.put(seqNum, payload);
+            }
+
+            while (buffer.containsKey(expectedSeqNum)) {
+                byte[] data = buffer.get(expectedSeqNum);
+                deliverData(expectedSeqNum, data);
+                buffer.remove(expectedSeqNum);
+                expectedSeqNum++;
+            }
+            return true;
+        } else if (seqNum < expectedSeqNum) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    //STRETCH GOAL: 3-Way Handshake Listener
     public boolean listenForHandshake(DatagramSocket socket) throws IOException {
         System.out.println("[Server] Waiting for client connection (SYN)...");
         socket.setSoTimeout(0);
@@ -56,7 +77,7 @@ public class SelectiveRepeatReceiver {
         }
     }
 
-    // --- STRETCH GOAL: Graceful Teardown Listener ---
+    //STRETCH GOAL: Graceful Teardown Listener 
     public void listenForTeardown(DatagramSocket socket) throws IOException {
         System.out.println("[Teardown] Waiting for FIN from sender...");
         socket.setSoTimeout(5000);
@@ -78,12 +99,12 @@ public class SelectiveRepeatReceiver {
         }
     }
 
-    // --- STRETCH GOAL: Flow Control (Available Window Calculation) ---
+    //STRETCH GOAL: Flow Control
     public int getAvailableWindow() {
         return windowSize - buffer.size();
     }
 
-    // --- STRETCH GOAL: SACK Blocks (Generate non-contiguous ranges) ---
+    //STRETCH GOAL: SACK Blocks
     public String getSackBlockReport() {
         if (buffer.isEmpty()) {
             return "";
@@ -110,27 +131,6 @@ public class SelectiveRepeatReceiver {
         }
         
         return sackReport.toString().trim();
-    }
-
-    // Process an incoming packet
-    public boolean addPacket(int seqNum, byte[] payload) {
-        if (seqNum >= expectedSeqNum && seqNum < expectedSeqNum + windowSize) {
-            if (!buffer.containsKey(seqNum)) {
-                buffer.put(seqNum, payload);
-            }
-
-            while (buffer.containsKey(expectedSeqNum)) {
-                byte[] data = buffer.get(expectedSeqNum);
-                deliverData(expectedSeqNum, data);
-                buffer.remove(expectedSeqNum);
-                expectedSeqNum++;
-            }
-            return true;
-        } else if (seqNum < expectedSeqNum) {
-            return true;
-        }
-        
-        return false;
     }
 
     private void deliverData(int seqNum, byte[] data) {
