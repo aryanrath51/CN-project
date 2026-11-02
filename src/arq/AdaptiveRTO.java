@@ -14,7 +14,7 @@ public class AdaptiveRTO {
         this.rto = initialRtoMillis;
     }
 
-    // Called when a packet is successfully acknowledged (Karn's algorithm: ignore retransmitted samples)
+    // Called when a packet is successfully acknowledged
     public void updateRtt(double sampleRtt, boolean wasRetransmitted) {
         if (wasRetransmitted) {
             // Karn's algorithm: Do not update RTT estimation for retransmitted packets to avoid ambiguity
@@ -26,7 +26,6 @@ public class AdaptiveRTO {
         srtt = (1 - ALPHA) * srtt + ALPHA * sampleRtt;
         rto = srtt + 4.0 * rttvar;
 
-        // Ensure a safe minimum RTO (e.g., 20ms)
         if (rto < 20.0) {
             rto = 20.0;
         }

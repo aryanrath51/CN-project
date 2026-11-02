@@ -6,8 +6,8 @@ def plot_benchmarks():
     # --- Experiment 1: Goodput vs Packet Loss Rate ---
     loss_rates = [0, 5, 10, 15, 20, 25, 30]
     goodput_sw = [1200, 900, 500, 200, 100, 50, 20]
-    goodput_gbn = [1480, 1200, 750, 400, 180, 80, 30]
-    goodput_sr = [1500, 1450, 1400, 1300, 1100, 900, 750]
+    goodput_gbn = [1200, 1200, 750, 400, 180, 80, 30]
+    goodput_sr = [1200, 1450, 1400, 1300, 1100, 900, 750]
 
     plt.figure(figsize=(8, 5))
     plt.plot(loss_rates, goodput_sw, marker='o', label='Stop-and-Wait')
